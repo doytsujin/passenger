@@ -476,8 +476,15 @@ body_rechunk_output_filter(void *data, ngx_chain_t *input)
 out:
 
     rc = ngx_chain_writer(&r->upstream->writer, output_head);
+
+    /*
+     * The previous ngx_chain_writer() call consumed some buffers.
+     * Find such consumped (empty) buffers in the output buffer list,
+     * and either free them or add them to the freelist depending on
+     * whether the buffer's tag matches ours.
+     */
     ngx_chain_update_chains(r->pool, &ctx->free, &ctx->busy, &output_head,
-                         (ngx_buf_tag_t) &body_rechunk_output_filter);
+        (ngx_buf_tag_t) &body_rechunk_output_filter);
 
     return rc;
 }
@@ -498,7 +505,6 @@ typedef struct {
     ngx_str_t     method; /* Includes trailing space */
     ngx_str_t     app_type;
     ngx_str_t     escaped_uri;
-    ngx_str_t     content_length;
     ngx_str_t     core_password;
     ngx_str_t     remote_port;
 } buffer_construction_state;
@@ -596,16 +602,6 @@ prepare_request_buffer_construction(ngx_http_request_t *r, passenger_context_t *
         ngx_escape_uri(state->escaped_uri.data, r->uri.data, r->uri.len,
             NGX_ESCAPE_URI);
     }
-
-    if (r->headers_in.chunked) {
-        /* If the request body is chunked, then Nginx sets r->headers_in.content_length_n
-         * but does not set r->headers_in.headers, so we add this header ourselves.
-         */
-        state->content_length.data = ngx_pnalloc(r->pool, sizeof("4294967295") - 1);
-        state->content_length.len = ngx_snprintf(state->content_length.data,
-            sizeof("4294967295") - 1, "%O", r->headers_in.content_length_n)
-            - state->content_length.data;
-    } // else: content_length not used
 
     state->core_password.data = (u_char *) psg_watchdog_launcher_get_core_password(
         psg_watchdog_launcher, &len);
